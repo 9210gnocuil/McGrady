@@ -10,6 +10,8 @@ import android.widget.BaseAdapter;
 import android.widget.ImageView;
 import android.widget.ListView;
 
+import static com.liucong.mcgrady.McGrady.load;
+
 public class MainActivity extends AppCompatActivity {
 
     public final static String[] imageUrls = new String[] {
@@ -99,11 +101,22 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
 
-            View inflate = View.inflate(MainActivity.this, R.layout.lv_item, null);
-            ImageView iv = (ImageView) inflate.findViewById(R.id.item_iv);
-            McGrady.from(MainActivity.this).load(imageUrls[position],iv);
-            return inflate;
+            ViewHolder holder;
+            if(convertView == null){
+                holder = new ViewHolder();
+                convertView = View.inflate(MainActivity.this, R.layout.lv_item, null);
+                holder.iv = (ImageView) convertView.findViewById(R.id.item_iv);
+                convertView.setTag(holder);
+            }else{
+                holder = (ViewHolder) convertView.getTag();
+            }
+            McGrady.from(MainActivity.this).placeHolder(R.drawable.defaultimg).diskCacheStrategy(McGrady.DiskCacheStrategy.DISK_ONLY).load(imageUrls[position],holder.iv);
+            return convertView;
         }
     };
+
+    private class ViewHolder{
+        ImageView iv;
+    }
 
 }

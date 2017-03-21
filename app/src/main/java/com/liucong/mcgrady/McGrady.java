@@ -36,6 +36,21 @@ public class McGrady {
     private static Context mContext;
     private static final int MAX_CAPACITY = 16;
 
+    private static int cacheStrategy;
+    private static ImageView outsideImageView;
+
+    private static int defaultImgId ;
+    private static int errorImgId ;
+
+    //缓存策略
+    public static class DiskCacheStrategy{
+        public static final int NONE = 1;
+        public static final int CACHE_ONLY = 2;
+        public static final int DISK_ONLY = 3;
+        public static final int DEFAULT = 0; //默认缓存内存和磁盘
+    }
+
+    //保存图片的仓库
     private static LinkedHashMap<String,SoftReference<Bitmap>> imageRepository = new LinkedHashMap<String,SoftReference<Bitmap>>(MAX_CAPACITY){
         @Override
         protected boolean removeEldestEntry(Entry<String, SoftReference<Bitmap>> eldest) {
@@ -50,7 +65,11 @@ public class McGrady {
         }
     };
 
-    //将图片保存到磁盘中 应该以下载地址作MD5加密后作为文件名
+    /**
+     * 将图片保存到磁盘中
+     * @param key
+     * @param value
+     */
     private static void cacheToDisk(String key,SoftReference<Bitmap> value) {
         String fileName = MD5Utils.encode(key);
         String path = mContext.getCacheDir().getAbsolutePath();
@@ -71,6 +90,11 @@ public class McGrady {
         }
     }
 
+    /**
+     * 传入context
+     * @param context
+     * @return
+     */
     public static McGrady from(Context context){
         mContext = context;
 
@@ -80,23 +104,77 @@ public class McGrady {
         return mMcGrady;
     }
 
+    /**
+     * 加载图片
+     * @param url
+     * @param iv
+     * @return
+     */
     public static McGrady load(String url,ImageView iv){
 
-        if(url==null){
+        if(url==null || iv == null){
+            return mMcGrady;
+        }
+        if(defaultImgId != 0){
+            iv.setImageResource(defaultImgId);
+        }
+
+        //首先查看缓存策略
+        Bitmap cache =null;
+        switch (cacheStrategy){
+            case DiskCacheStrategy.DEFAULT:
+                // 首先检查是否存在缓存(内存，磁盘)，
+                // 如果有缓存就从缓存中读取并将读取的这个引用放到集合最前面
+                cache = fromCache(url,DiskCacheStrategy.DEFAULT);
+                break;
+            case DiskCacheStrategy.CACHE_ONLY:
+                cache = fromCache(url,DiskCacheStrategy.CACHE_ONLY);
+                break;
+            case DiskCacheStrategy.DISK_ONLY:
+                cache = fromCache(url,DiskCacheStrategy.DISK_ONLY);
+                break;
+            case DiskCacheStrategy.NONE:
+                break;
+        }
+
+
+        if(cache !=null){
+            iv.setImageBitmap(cache);
+            if(cacheStrategy == DiskCacheStrategy.DEFAULT || cacheStrategy == DiskCacheStrategy.CACHE_ONLY)
+                imageRepository.put(url,new SoftReference<Bitmap>(cache));
             return mMcGrady;
         }
 
-        // 首先检查是否存在缓存(内存，磁盘)，
-        // 如果有缓存就从缓存中读取并将读取的这个引用放到集合最前面
-        Bitmap cache = fromCache(url);
-        if(cache !=null){
-            iv.setImageBitmap(cache);
-            imageRepository.put(url,new SoftReference<Bitmap>(cache));
-            return mMcGrady;
-        }
         //从网络中下载
+        iv.setTag(url);
         new DownloadTask(iv).execute(url);
         return mMcGrady;
+    }
+
+    /**
+     * 设置默认占位符
+     * 在图片还未加载完成时设置显示的图片
+     * @param imgResId
+     * @return
+     */
+    public static McGrady placeHolder(int imgResId){
+        defaultImgId = imgResId;
+        return mMcGrady;
+    }
+
+    /**
+     * 设置缓存策略
+     * @param CacheStrategy
+     * @return
+     */
+    public static McGrady diskCacheStrategy(int CacheStrategy){
+        cacheStrategy = CacheStrategy;
+        return mMcGrady;
+    }
+
+    public static McGrady error(int errImgResId){
+        errorImgId = errImgResId;
+        return  mMcGrady;
     }
 
     //下载图片的任务
@@ -136,17 +214,49 @@ public class McGrady {
         //下载完毕后将图片保存到缓存中并设置到对应的控件里面
         @Override
         protected void onPostExecute(Bitmap bitmap) {
-            if(bitmap == null)
-                return;
 
-            if(iv!=null){
-                iv.setImageBitmap(bitmap);
+            if(iv==null){
+                return;
             }
-            //保存到cache
-            Log.i("McGrady","从网络中下载");
-            SoftReference<Bitmap> ref = new SoftReference<>(bitmap);
-            cacheToDisk(url,ref);
-            imageRepository.put(url,ref);
+
+            if(bitmap == null) {
+                if(errorImgId != 0){
+                    iv.setImageResource(errorImgId);
+                }
+
+                return;
+            }else{
+                //iv 和bitmap不都为0
+                //看模式
+                SoftReference<Bitmap> ref = new SoftReference<Bitmap>(bitmap);
+
+                switch (cacheStrategy){
+                    case DiskCacheStrategy.DEFAULT:
+
+                        cacheToDisk(url,ref);
+                        imageRepository.put(url,ref);
+
+                        break;
+                    case DiskCacheStrategy.CACHE_ONLY:
+
+                        imageRepository.put(url,ref);
+
+                        break;
+                    case DiskCacheStrategy.DISK_ONLY:
+                        cacheToDisk(url,ref);
+
+                        break;
+                    case DiskCacheStrategy.NONE:
+                        break;
+                }
+
+                String tag = (String) iv.getTag();
+                if(tag != null && tag.equals(url)){
+                    iv.setImageBitmap(bitmap);
+                    //保存到cache
+                    Log.i("McGrady","从网络中下载");
+                }
+            }
         }
     }
 
@@ -156,29 +266,37 @@ public class McGrady {
      * @param url
      * @return
      */
-    private static Bitmap fromCache(String url) {
-        //首先检查内存中是否存在
-        SoftReference<Bitmap> bitmapRef = imageRepository.get(url);
-        if(bitmapRef!=null){
-            if(bitmapRef.get()!=null){
-                Log.i("McGrady","从cache中加载");
-                return bitmapRef.get();
+    private static Bitmap fromCache(String url,int cacheMode) {
+
+        //如果缓存模式为cache或者默认
+        if(cacheMode == DiskCacheStrategy.CACHE_ONLY || cacheMode == DiskCacheStrategy.DEFAULT){
+            //首先检查内存中是否存在
+            SoftReference<Bitmap> bitmapRef = imageRepository.get(url);
+            if(bitmapRef!=null){
+                if(bitmapRef.get()!=null){
+                    Log.i("McGrady","从cache中加载");
+                    return bitmapRef.get();
+                }
             }
         }
+
+        //如果缓存模式为默认或者disk
+        if(cacheMode==DiskCacheStrategy.DEFAULT || cacheMode == DiskCacheStrategy.DISK_ONLY){
         //内存中不存在
         //检查磁盘
-        String filePath = mContext.getCacheDir().getAbsolutePath()+"/"+MD5Utils.encode(url);
-        File file = new File(filePath);
-        if(file.exists()){
-            FileInputStream fis = null;
-            try {
-                fis =  new FileInputStream(file);
-                Log.i("McGrady","从本地文件中加载");
-                return BitmapFactory.decodeStream(fis);
-            } catch (FileNotFoundException e) {
-                e.printStackTrace();
-            } finally {
-                StreamUtils.close(fis);
+            String filePath = mContext.getCacheDir().getAbsolutePath()+"/"+MD5Utils.encode(url);
+            File file = new File(filePath);
+            if(file.exists()){
+                FileInputStream fis = null;
+                try {
+                    fis =  new FileInputStream(file);
+                    Log.i("McGrady","从本地文件中加载");
+                    return BitmapFactory.decodeStream(fis);
+                } catch (FileNotFoundException e) {
+                    e.printStackTrace();
+                } finally {
+                    StreamUtils.close(fis);
+                }
             }
         }
         return null;
