@@ -5,6 +5,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.media.Image;
 import android.os.AsyncTask;
+import android.support.v4.util.LruCache;
 import android.util.Log;
 import android.widget.ImageView;
 
@@ -17,24 +18,20 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.lang.ref.SoftReference;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.net.URLConnection;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * Created by liucong on 2017/3/21.
  * 一个简单的图片加载框架
+ * 使用lru缓存
  */
 
 public class McGrady {
 
     private static McGrady mMcGrady;
     private static Context mContext;
-    private static final int MAX_CAPACITY = 16;
 
     private static int cacheStrategy;
     private static ImageView outsideImageView;
@@ -50,42 +47,43 @@ public class McGrady {
         public static final int DEFAULT = 0; //默认缓存内存和磁盘
     }
 
-    //保存图片的仓库
-    private static LinkedHashMap<String,SoftReference<Bitmap>> imageRepository = new LinkedHashMap<String,SoftReference<Bitmap>>(MAX_CAPACITY){
+    //最大缓存容量设置为程序最大可用内存的1/8
+    public static int maxCacheCapacity = (int) (Runtime.getRuntime().maxMemory()/8);
+
+
+    public static LruCache<String,Bitmap> mMemoryCache = new LruCache<String,Bitmap>(maxCacheCapacity){
         @Override
-        protected boolean removeEldestEntry(Entry<String, SoftReference<Bitmap>> eldest) {
-            //首先检查是否到了容量上限
-            if(this.size()>MAX_CAPACITY){
-                //到了上限，删除最近最少使用的那个
-                return true;
+        protected int sizeOf(String key, Bitmap value) {
+
+            //首先查看策略 看是否值允许内存缓存 如果不是cacheonly 就要在添加的时候向缓存里面添加数据
+            if(cacheStrategy != DiskCacheStrategy.CACHE_ONLY) {
+                cacheToDisk(key, value);
             }
-            //王磁盘里面添加数据
-            cacheToDisk(eldest.getKey(),eldest.getValue());
-            return false;
+            Log.i("McGrady", "缓存最大容量:"+maxCacheCapacity+" 当前缓存容量:"+mMemoryCache.size());
+
+            return value.getByteCount();
         }
     };
+
 
     /**
      * 将图片保存到磁盘中
      * @param key
      * @param value
      */
-    private static void cacheToDisk(String key,SoftReference<Bitmap> value) {
+    private static void cacheToDisk(String key,Bitmap value) {
         String fileName = MD5Utils.encode(key);
         String path = mContext.getCacheDir().getAbsolutePath();
         if(value != null){
-            Bitmap bitmap = value.get();
-            if (bitmap !=null){
-                File cache = new File(path+"/"+fileName);
-                FileOutputStream fos = null;
-                try {
-                    fos = new FileOutputStream(path+"/"+fileName);
-                    bitmap.compress(Bitmap.CompressFormat.JPEG,80,fos);
-                } catch (FileNotFoundException e) {
-                    e.printStackTrace();
-                } finally {
-                    StreamUtils.close(fos);
-                }
+            File cache = new File(path+"/"+fileName);
+            FileOutputStream fos = null;
+            try {
+                fos = new FileOutputStream(path+"/"+fileName);
+                value.compress(Bitmap.CompressFormat.JPEG,80,fos);
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            } finally {
+                StreamUtils.close(fos);
             }
         }
     }
@@ -140,8 +138,7 @@ public class McGrady {
 
         if(cache !=null){
             iv.setImageBitmap(cache);
-            if(cacheStrategy == DiskCacheStrategy.DEFAULT || cacheStrategy == DiskCacheStrategy.CACHE_ONLY)
-                imageRepository.put(url,new SoftReference<Bitmap>(cache));
+
             return mMcGrady;
         }
 
@@ -228,23 +225,20 @@ public class McGrady {
             }else{
                 //iv 和bitmap不都为0
                 //看模式
-                SoftReference<Bitmap> ref = new SoftReference<Bitmap>(bitmap);
-
                 switch (cacheStrategy){
                     case DiskCacheStrategy.DEFAULT:
-
-                        cacheToDisk(url,ref);
-                        imageRepository.put(url,ref);
-
+                        //添加到lru缓存中
+                        mMemoryCache.put(url,bitmap);
+                        //缓存到磁盘中
+                        cacheToDisk(url,bitmap);
                         break;
                     case DiskCacheStrategy.CACHE_ONLY:
-
-                        imageRepository.put(url,ref);
-
+                        //添加到lru缓存中
+                        mMemoryCache.put(url,bitmap);
                         break;
                     case DiskCacheStrategy.DISK_ONLY:
-                        cacheToDisk(url,ref);
-
+                        //缓存到磁盘中
+                        cacheToDisk(url,bitmap);
                         break;
                     case DiskCacheStrategy.NONE:
                         break;
@@ -269,14 +263,13 @@ public class McGrady {
     private static Bitmap fromCache(String url,int cacheMode) {
 
         //如果缓存模式为cache或者默认
-        if(cacheMode == DiskCacheStrategy.CACHE_ONLY || cacheMode == DiskCacheStrategy.DEFAULT){
+        if(cacheMode == DiskCacheStrategy.DEFAULT || cacheMode == DiskCacheStrategy.CACHE_ONLY){
             //首先检查内存中是否存在
-            SoftReference<Bitmap> bitmapRef = imageRepository.get(url);
-            if(bitmapRef!=null){
-                if(bitmapRef.get()!=null){
-                    Log.i("McGrady","从cache中加载");
-                    return bitmapRef.get();
-                }
+
+            Bitmap cache = mMemoryCache.get(url);
+            if(cache!=null){
+                Log.i("McGrady","从cache中加载");
+                return cache;
             }
         }
 

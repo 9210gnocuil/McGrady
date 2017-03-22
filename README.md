@@ -4,7 +4,18 @@
 
 
 ##update
-###2017.3.21
+2017.3.22
+1.使用android中自带的lru算法缓存，替代之前用LinkedHashMap实现的lru，简化代码
+```java
+public static LruCache<String,Bitmap> mMemoryCache = new LruCache<String,Bitmap>(maxCacheCapacity){
+        @Override
+        protected int sizeOf(String key, Bitmap value) {
+            return value.getByteCount();
+        }
+    };
+```
+
+2017.3.21
 1. 添加缓存策略
 ```java
 public static class DiskCacheStrategy{
