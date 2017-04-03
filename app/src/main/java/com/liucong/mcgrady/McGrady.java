@@ -41,26 +41,23 @@ public class McGrady {
 
     //缓存策略
     public static class DiskCacheStrategy{
-        public static final int NONE = 1;
-        public static final int CACHE_ONLY = 2;
-        public static final int DISK_ONLY = 3;
-        public static final int DEFAULT = 0; //默认缓存内存和磁盘
+        public static final int NONE = 1<<1;
+        public static final int CACHE = 1<<2;
+        public static final int DISK = 1<<3;
     }
+
+    //私有构造
+    private McGrady(){}
 
     //最大缓存容量设置为程序最大可用内存的1/8
     public static int maxCacheCapacity = (int) (Runtime.getRuntime().maxMemory()/8);
 
 
+    //LRU缓存
     public static LruCache<String,Bitmap> mMemoryCache = new LruCache<String,Bitmap>(maxCacheCapacity){
         @Override
         protected int sizeOf(String key, Bitmap value) {
-
-            //首先查看策略 看是否值允许内存缓存 如果不是cacheonly 就要在添加的时候向缓存里面添加数据
-            if(cacheStrategy != DiskCacheStrategy.CACHE_ONLY) {
-                cacheToDisk(key, value);
-            }
-            Log.i("McGrady", "缓存最大容量:"+maxCacheCapacity+" 当前缓存容量:"+mMemoryCache.size());
-
+            Log.i("McGrady","已缓存:"+(mMemoryCache.size()*100/mMemoryCache.maxSize()+"%"));
             return value.getByteCount();
         }
     };
@@ -80,6 +77,7 @@ public class McGrady {
             try {
                 fos = new FileOutputStream(path+"/"+fileName);
                 value.compress(Bitmap.CompressFormat.JPEG,80,fos);
+
             } catch (FileNotFoundException e) {
                 e.printStackTrace();
             } finally {
@@ -96,8 +94,13 @@ public class McGrady {
     public static McGrady from(Context context){
         mContext = context;
 
-        if( mMcGrady == null){
-            mMcGrady = new McGrady();
+        if(mMcGrady == null){
+
+            synchronized (McGrady.class){
+                if( mMcGrady == null){
+                    mMcGrady = new McGrady();
+                }
+            }
         }
         return mMcGrady;
     }
@@ -117,24 +120,14 @@ public class McGrady {
             iv.setImageResource(defaultImgId);
         }
 
-        //首先查看缓存策略
         Bitmap cache =null;
-        switch (cacheStrategy){
-            case DiskCacheStrategy.DEFAULT:
-                // 首先检查是否存在缓存(内存，磁盘)，
-                // 如果有缓存就从缓存中读取并将读取的这个引用放到集合最前面
-                cache = fromCache(url,DiskCacheStrategy.DEFAULT);
-                break;
-            case DiskCacheStrategy.CACHE_ONLY:
-                cache = fromCache(url,DiskCacheStrategy.CACHE_ONLY);
-                break;
-            case DiskCacheStrategy.DISK_ONLY:
-                cache = fromCache(url,DiskCacheStrategy.DISK_ONLY);
-                break;
-            case DiskCacheStrategy.NONE:
-                break;
-        }
 
+        // 首先查看缓存策略 是否允许缓存
+        if((cacheStrategy&DiskCacheStrategy.NONE)==0){
+            //拥有缓存
+            //从缓存中读取数据
+            cache = fromCache(url);
+        }
 
         if(cache !=null){
             iv.setImageBitmap(cache);
@@ -223,25 +216,23 @@ public class McGrady {
 
                 return;
             }else{
+
                 //iv 和bitmap不都为0
-                //看模式
-                switch (cacheStrategy){
-                    case DiskCacheStrategy.DEFAULT:
-                        //添加到lru缓存中
-                        mMemoryCache.put(url,bitmap);
-                        //缓存到磁盘中
-                        cacheToDisk(url,bitmap);
-                        break;
-                    case DiskCacheStrategy.CACHE_ONLY:
-                        //添加到lru缓存中
-                        mMemoryCache.put(url,bitmap);
-                        break;
-                    case DiskCacheStrategy.DISK_ONLY:
-                        //缓存到磁盘中
-                        cacheToDisk(url,bitmap);
-                        break;
-                    case DiskCacheStrategy.NONE:
-                        break;
+                //根据缓存策略进行操作
+
+                //允许内存缓存
+                if((cacheStrategy&DiskCacheStrategy.CACHE)!=0){
+                    //将数据缓存到lru中
+                    mMemoryCache.put(url,bitmap);
+                    Log.i("McGrady","Bitmap已缓存到Lru中");
+                }
+
+                //允许磁盘缓存
+                if((cacheStrategy&DiskCacheStrategy.DISK)!=0){
+                    //将数据缓存到磁盘上
+                    cacheToDisk(url,bitmap);
+                    Log.i("McGrady","Bitmap已缓存到磁盘上");
+
                 }
 
                 String tag = (String) iv.getTag();
@@ -260,23 +251,22 @@ public class McGrady {
      * @param url
      * @return
      */
-    private static Bitmap fromCache(String url,int cacheMode) {
+    private static Bitmap fromCache(String url) {
 
-        //如果缓存模式为cache或者默认
-        if(cacheMode == DiskCacheStrategy.DEFAULT || cacheMode == DiskCacheStrategy.CACHE_ONLY){
-            //首先检查内存中是否存在
+        //能进这个方法说明至少允许使用一种缓存
 
+        //允许内存缓存
+        if((cacheStrategy&DiskCacheStrategy.CACHE)!=0){
+
+            //从lru缓存中获取
             Bitmap cache = mMemoryCache.get(url);
             if(cache!=null){
-                Log.i("McGrady","从cache中加载");
+                Log.i("McGrady","从cache中加载 加载成功");
                 return cache;
             }
         }
-
-        //如果缓存模式为默认或者disk
-        if(cacheMode==DiskCacheStrategy.DEFAULT || cacheMode == DiskCacheStrategy.DISK_ONLY){
-        //内存中不存在
-        //检查磁盘
+        //允许磁盘缓存
+        if((cacheStrategy&DiskCacheStrategy.DISK)!=0){
             String filePath = mContext.getCacheDir().getAbsolutePath()+"/"+MD5Utils.encode(url);
             File file = new File(filePath);
             if(file.exists()){
@@ -292,6 +282,7 @@ public class McGrady {
                 }
             }
         }
+        //如果没有缓存就返回null
         return null;
     }
 }

@@ -110,7 +110,7 @@ public class MainActivity extends AppCompatActivity {
             }else{
                 holder = (ViewHolder) convertView.getTag();
             }
-            McGrady.from(MainActivity.this).placeHolder(R.drawable.defaultimg).diskCacheStrategy(McGrady.DiskCacheStrategy.CACHE_ONLY).load(imageUrls[position],holder.iv);
+            McGrady.from(MainActivity.this).placeHolder(R.drawable.defaultimg).diskCacheStrategy(McGrady.DiskCacheStrategy.CACHE).load(imageUrls[position],holder.iv);
             return convertView;
         }
     };
