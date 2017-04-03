@@ -1,5 +1,6 @@
 package com.liucong.mcgrady;
 
+import android.app.Notification;
 import android.content.Context;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
@@ -110,7 +111,7 @@ public class MainActivity extends AppCompatActivity {
             }else{
                 holder = (ViewHolder) convertView.getTag();
             }
-            McGrady.from(MainActivity.this).placeHolder(R.drawable.defaultimg).diskCacheStrategy(McGrady.DiskCacheStrategy.CACHE).load(imageUrls[position],holder.iv);
+            McGrady.from(MainActivity.this).placeHolder(R.drawable.loading).error(R.drawable.error).diskCacheStrategy(McGrady.DiskCacheStrategy.CACHE).load(imageUrls[position],holder.iv);
             return convertView;
         }
     };
@@ -119,4 +120,9 @@ public class MainActivity extends AppCompatActivity {
         ImageView iv;
     }
 
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        McGrady.shutdownThreadPool();
+    }
 }
