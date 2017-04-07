@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.content.Context;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -11,9 +12,9 @@ import android.widget.BaseAdapter;
 import android.widget.ImageView;
 import android.widget.ListView;
 
-import static com.liucong.mcgrady.McGrady.load;
-
 public class MainActivity extends AppCompatActivity {
+
+    private static final String TAG = "MainActivity";
 
     public final static String[] imageUrls = new String[] {
             "http://img.my.csdn.net/uploads/201309/01/1378037235_3453.jpg",
@@ -111,7 +112,8 @@ public class MainActivity extends AppCompatActivity {
             }else{
                 holder = (ViewHolder) convertView.getTag();
             }
-            McGrady.from(MainActivity.this).placeHolder(R.drawable.loading).error(R.drawable.error).diskCacheStrategy(McGrady.DiskCacheStrategy.CACHE).load(imageUrls[position],holder.iv);
+            Log.i(TAG, "使用McGrady请求网络"+position);
+            McGrady.from(MainActivity.this).placeHolder(R.drawable.loading).error(R.drawable.error).diskCacheStrategy(Cache.DiskCacheStrategy.CACHE).load(imageUrls[position],holder.iv);
             return convertView;
         }
     };
@@ -123,6 +125,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        McGrady.shutdownThreadPool();
+        McGrady.from(MainActivity.this).shutdown();
     }
 }
